@@ -255,47 +255,102 @@ void SVFG::writeToFile(const string& filename)
         F.os().clear_error();
         return;
     }
+    F.os() << "__Nodes__\n";
     // nodes
+    for(iterator it = begin(), eit = end(); it!=eit; ++it)
+    {
+        NodeID nodeId = it->first;
+        const SVFGNode* node = it->second;
+        if(const FormalINSVFGNode* formalIn = SVFUtil::dyn_cast<FormalINSVFGNode>(node))
+        {
+            //node
+            F.os() << nodeId << ">=" << "FormalINSVFGNode";
+            F.os() << ">=MVER: {";
+            F.os() << *formalIn->getMRVer() << "}>=" << formalIn->getFunEntryNode()->getId() << "\n";
+        }
+        else if(const FormalOUTSVFGNode* formalOut = SVFUtil::dyn_cast<FormalOUTSVFGNode>(node))
+        {
+            //node
+            F.os() << nodeId << ">=" << "FormalOUTSVFGNode";
+            F.os() << ">=MVER: {";
+            F.os() << *formalOut->getMRVer() << "}>=" <<  formalOut->getFunExitNode()->getId() << "\n";
+        }
+        else if(const ActualINSVFGNode* actualIn = SVFUtil::dyn_cast<ActualINSVFGNode>(node))
+        {
+            //node
+            F.os() << nodeId << ">=" << "ActualINSVFGNode";
+            F.os() << ">=MVER: {";
+            F.os() << *actualIn->getMRVer() << "}>=" << actualIn->getCallSite()->getId() << "\n";
+        }
+        else if(const ActualOUTSVFGNode* actualOut = SVFUtil::dyn_cast<ActualOUTSVFGNode>(node))
+        {
+            //node
+            F.os() <<  nodeId << ">=" << "ActualOUTSVFGNode" << ">=MVER: {";
+            F.os()  << *actualOut->getMRVer() << "}>="  <<  actualOut->getCallSite()->getId() << "\n";
+        }
+        else if(const MSSAPHISVFGNode* phiNode = SVFUtil::dyn_cast<MSSAPHISVFGNode>(node))
+        {
+
+            //node
+            F.os() << nodeId << ">=" << "PHISVFGNode";
+            unordered_map<u32_t,const MRVer*> opvers;
+            for (MemSSA::PHI::OPVers::const_iterator it = phiNode->opVerBegin(), eit = phiNode->opVerEnd();
+                    it != eit; it++)
+            {
+                opvers.insert(make_pair(it->first, it->second));
+            }              
+                // opvers
+            F.os() << ">=MVER: {";
+            F.os() << *phiNode->getResVer();
+            F.os() << "}>=" << pag->getICFG()->getBlockICFGNode(&(phiNode->getICFGNode()->getBB()->front()))->getId();
+            F.os() << ">=OPVers: {";
+            for (auto x: opvers) 
+            {
+                const MRVer* op = x.second;
+                F.os() << "{" << *op << "}" << ",";
+            }
+            F.os() << "}\n";
+        }
+    }
+
+    F.os() << "\n\n__Edges__\n";
+    // Edges
     for(iterator it = begin(), eit = end(); it!=eit; ++it)
     {
         NodeID nodeId = it->first;
         const SVFGNode* node = it->second;
         if(const LoadSVFGNode* loadNode = SVFUtil::dyn_cast<LoadSVFGNode>(node))
         {
-            F.os() << nodeId << ">=" << "LoadNode" << ">=Edges: {";
+            F.os() << nodeId << ">=" << "LoadNode"<< ">=Edges: (";
             MUSet& muSet = mssa->getMUSet(SVFUtil::cast<LoadPE>(loadNode->getPAGEdge()));
-            MRVer* tempMRVer;
             for(MUSet::iterator it = muSet.begin(), eit = muSet.end(); it!=eit; ++it)
             {
                 if(LOADMU* mu = SVFUtil::dyn_cast<LOADMU>(*it))
                 {
                     NodeID def = getDef(mu->getMRVer());
-                    tempMRVer = mu->getMRVer();
-                    F.os() << def << ",";
+                    F.os() << def << "|MVER: {"<< *mu->getMRVer() << "},";
                 }
             }
-            F.os() << "}>=MVER: {"<< *tempMRVer << "}>=\n";
+            F.os() << ")\n";
         }
         else if(const StoreSVFGNode* storeNode = SVFUtil::dyn_cast<StoreSVFGNode>(node))
         {
-            F.os() << nodeId << ">=" << "StoreNode" << ">=Edges: {";
+            F.os() << nodeId << ">=" << "StoreNode" << ">=Edges: (";
             CHISet& chiSet = mssa->getCHISet(SVFUtil::cast<StorePE>(storeNode->getPAGEdge()));
-            MRVer* tempMRVer;
             for(CHISet::iterator it = chiSet.begin(), eit = chiSet.end(); it!=eit; ++it)
             {
                 if(STORECHI* chi = SVFUtil::dyn_cast<STORECHI>(*it))
                 {
                     NodeID def = getDef(chi->getOpVer());
-                    tempMRVer = chi->getOpVer();
-                     F.os() << def << ",";
+                    F.os() << def << "|MVER: {"<< *chi->getOpVer() << "},";
                 }
             }
-            F.os() << "}>=MVER: {"<< *tempMRVer << "}>=\n";
+            F.os() << ")\n";
         }
         else if(const FormalINSVFGNode* formalIn = SVFUtil::dyn_cast<FormalINSVFGNode>(node))
         {
             //node
-            F.os() << nodeId << ">=" << "FormalINSVFGNode" << ">=Edges: {";
+            F.os() << nodeId << ">=" << "FormalINSVFGNode" << ">=Edges: (";
             //edges
             PTACallGraphEdge::CallInstSet callInstSet;
             mssa->getPTA()->getPTACallGraph()->getDirCallSitesInvokingCallee(formalIn->getFun(),callInstSet);
@@ -311,13 +366,12 @@ void SVFG::writeToFile(const string& filename)
                     F.os() << actualIn->getId() << ",";
                 }
             }
-            F.os() << "}>=MVER: {";
-            F.os() << *formalIn->getMRVer() << "}>=" << formalIn->getFunEntryNode()->getId() << "\n";
+            F.os() << ")\n";
         }
         else if(const FormalOUTSVFGNode* formalOut = SVFUtil::dyn_cast<FormalOUTSVFGNode>(node))
         {
             //node
-            F.os() << nodeId << ">=" << "FormalOUTSVFGNode"  << ">=Edges: {";
+            F.os() << nodeId << ">=" << "FormalOUTSVFGNode"  << ">=Edges: (";
             //edges
             PTACallGraphEdge::CallInstSet callInstSet;
             mssa->getPTA()->getPTACallGraph()->getDirCallSitesInvokingCallee(formalOut->getFun(),callInstSet);
@@ -335,51 +389,29 @@ void SVFG::writeToFile(const string& filename)
             }
             NodeID def = getDef(formalOut->getMRVer());
             F.os() << "intra:" << def << ",";
-            F.os() << "}>=MVER: {";
-            F.os() << *formalOut->getMRVer() << "}>=" <<  formalOut->getFunExitNode()->getId() << "\n";
+            F.os() << ")\n";
         }
         else if(const ActualINSVFGNode* actualIn = SVFUtil::dyn_cast<ActualINSVFGNode>(node))
         {
             //node
-            F.os() << nodeId << ">=" << "ActualINSVFGNode" <<  ">=Edges: {"; 
+            F.os() << nodeId << ">=" << "ActualINSVFGNode" <<  ">=Edges: ("; 
             //edges
             NodeID def = getDef(actualIn->getMRVer());
-            F.os() << def << "}>=MVER: {";
-            F.os() << *actualIn->getMRVer() << "}>=" << actualIn->getCallSite()->getId() << "\n";
-        }
-        else if(const ActualOUTSVFGNode* actualOut = SVFUtil::dyn_cast<ActualOUTSVFGNode>(node))
-        {
-            //node
-            F.os() <<  nodeId << ">=" << "ActualOUTSVFGNode" << ">=MVER: {";
-            F.os()  << *actualOut->getMRVer() << "}>="  <<  actualOut->getCallSite()->getId() << "\n";
+            F.os() << def << ")\n";
         }
         else if(const MSSAPHISVFGNode* phiNode = SVFUtil::dyn_cast<MSSAPHISVFGNode>(node))
         {
             //node
-            F.os() << nodeId << ">=" << "PHISVFGNode" << ">=Edges: {"; 
-            unordered_map<u32_t,const MRVer*> opvers;
+            F.os() << nodeId << ">=" << "PHISVFGNode" << ">=Edges: ("; 
             //edges
             for (MemSSA::PHI::OPVers::const_iterator it = phiNode->opVerBegin(), eit = phiNode->opVerEnd();
                     it != eit; it++)
             {
                 const MRVer* op = it->second;
-                opvers.insert(make_pair(it->first, it->second));
                 NodeID def = getDef(op);
                 F.os() << def << ",";
-            }            
-            // opvers
-            F.os() << "}>=MVER: {";
-            //parameters
-            const IntraMSSAPHISVFGNode* intraPhiNode = SVFUtil::dyn_cast<IntraMSSAPHISVFGNode>(node);
-            F.os() << *phiNode->getResVer();
-            F.os() << "}>=" << pag->getICFG()->getBlockICFGNode(&(phiNode->getICFGNode()->getBB()->front()))->getId();
-            F.os() << ">=OPVers: {";
-            for (auto x: opvers) 
-            {
-                const MRVer* op = x.second;
-                F.os() << "{" << *op << "}" << ",";
             }
-            F.os() << "}\n";
+            F.os() << ")\n";
         }
     }
     // Job finish and close file
@@ -398,39 +430,36 @@ void SVFG::readFile(const string& filename){
     ifstream F(filename.c_str());
     if (!F.is_open())
     {
-        outs() << "  error opening file for reading!\n";
+        outs() << " error opening file for reading!\n";
         return;
     }
-    unordered_map<NodeID, pair<MRVer*, string>> nodeMRVers; 
-    unordered_map<NodeID, string> nodeEdges; 
+    unordered_map<NodeID, pair<MRVer*, string>> nodes; 
+    unordered_map<NodeID, string> edges; 
     //outer loop through each line in the file
     string line;
+    // add nodes
     while (F.good())
     {
         getline(F, line);
         if (line.empty())
             continue;
+        if (line.find("__Edges__") != std::string::npos)
+            break;
+
         std::string s = line; 
         std::string delimiter = ">=";
         string temp; 
-        int index = 0; 
+        int index = 0;
         //implement delimiter to split string using ">="
-        size_t last = 0; size_t next = 0; 
-        size_t outer_last = 0;
+        size_t last = 0; size_t next = 0; size_t outer_last = 0;
         NodeID id; 
         string type;
-        string edges;
         string MR;
-        string FunEntry;
-        string FunExit; 
-        string Callsite;
-        string resVer;
         string basicBlock; 
         string opVer;
         //inner loop through to get each element in the line
         while ((next = s.find(delimiter, last)) != string::npos) 
         {   
-            // outs() << s.substr(last, next-last) << "\n"; 
             temp = s.substr(last, next-last); 
             last = next + 2; 
             outer_last = next + 2; 
@@ -438,44 +467,21 @@ void SVFG::readFile(const string& filename){
             if(index == 1) {type = temp;}
             if(index > 1)
             {
-                if(type == "FormalINSVFGNode" || type == "FormalOUTSVFGNode" || type == "ActualINSVFGNode" || type == "PHISVFGNode")
-                {
-                    if(index == 2) {edges = temp;}
-                    if(index == 3) {MR = temp;}
-                    //phi
-                    if(index == 4) {basicBlock = temp;}
-                } else if(type == "ActualOUTSVFGNode")
-                {
-                    if(index == 2) {MR = temp;};
-                } else if (type == "StoreNode" || type == "LoadNode")
-                {
-                    if(index == 2) {edges = temp;}
-                    if(index == 3) {MR = temp;}
-                }
+                if(index == 2) {MR = temp;}
+                if(index == 3) {basicBlock = temp;}
             }
             index++; 
         }
-        MemRegion* tempMemRegion;
-        MSSADEF* tempDef;
         MRVer* tempMRVer; 
         if(!MR.empty())
         {
             tempMRVer = getMRVERFromString(MR);
-            nodeMRVers.insert(make_pair(id, make_pair(tempMRVer, type)));
-        }
-        // get edges for each node to connect after adding nodes
-        if (!edges.empty())
-        {
-            next = edges.find("Edges: {") + 8;
-            last = edges.find("}");
-            temp = edges.substr(next, last-next);
-            nodeEdges.insert(make_pair(id, temp)); 
-        }
+            nodes.insert(make_pair(id, make_pair(tempMRVer, type)));
+        } 
         //add nodes using the variables we extracted
         if(type == "FormalINSVFGNode")
         {
             NodeID FunID = atoi(s.substr(outer_last).c_str());
-            // // create node
             addFormalINSVFGNode(SVFUtil::dyn_cast<FunEntryBlockNode>(pag->getICFG()->getICFGNode(FunID)), tempMRVer, id);
         } else if(type == "FormalOUTSVFGNode")
         {
@@ -513,36 +519,82 @@ void SVFG::readFile(const string& filename){
         {
         }
     }
-    // connect edges here
-    for (auto x: nodeEdges) 
-    {
-        if (x.second.empty())
+
+    // Edges 
+    while (F.good())
+    {   
+        getline(F, line);
+        if (line.empty())
             continue;
-        string type = nodeMRVers[x.first].second;
-        vector<string> edges;
-        string s;
-        stringstream ss(x.second);
-        while (getline(ss, s, ',')) {
-            edges.push_back(s);
+        if (line.find("__Edges__") != std::string::npos)
+            break;
+
+        std::string s = line; 
+        std::string delimiter = ">=";
+        string temp; 
+        int index = 0;
+        size_t last = 0; size_t next = 0; size_t outer_last = 0;
+        NodeID id; 
+        string type;
+        string edgeStr;
+        
+        //inner loop through to get each element in the line
+        while ((next = s.find(delimiter, last)) != string::npos) 
+        {   
+            temp = s.substr(last, next-last); 
+            last = next + 2; 
+            outer_last = next + 2; 
+            if(index == 0) {id = atoi(temp.c_str());}
+            if(index == 1) {type = temp;}
+            index++; 
         }
-        for (string edgeStr: edges) 
+        edgeStr = s.substr(outer_last);
+
+        next = edgeStr.find("Edges: (") + 8;
+        last = edgeStr.find(")");
+        temp = edgeStr.substr(next, last-next);
+        if (temp.length() == 0)
+            continue;
+
+        vector<string> edges;
+        if (type != "StoreNode" && type != "LoadNode") 
+        {
+            string ss;
+            stringstream sss(temp);
+            while (getline(sss, ss, ',')) {
+                edges.push_back(ss);
+            }
+        } 
+        else
+        {
+            size_t pos = 0;
+            string ss;
+            while ((pos = temp.find("},")) != std::string::npos) {
+                ss = temp.substr(0, pos);
+                edges.push_back(ss);
+                temp.erase(0, pos + delimiter.length());
+            }
+            if (temp.length() > 0)
+                edges.push_back(temp);
+        }
+        for (string x: edges) 
         {
             NodeID edge;
-            if (edgeStr.find("intra") == string::npos)
-                edge = atoi(edgeStr.c_str());
+            if (x.find("intra") == string::npos || type != "StoreNode" || type != "LoadNode")
+                edge = atoi(x.c_str());
             if(type == "FormalINSVFGNode")
             {
-                const FormalINSVFGNode* formalIn = SVFUtil::cast<FormalINSVFGNode>(getSVFGNode(x.first));
+                const FormalINSVFGNode* formalIn = SVFUtil::cast<FormalINSVFGNode>(getSVFGNode(id));
                 const ActualINSVFGNode* actualIn = SVFUtil::cast<ActualINSVFGNode>(getSVFGNode(edge));
                 addInterIndirectVFCallEdge(actualIn,formalIn, getCallSiteID(actualIn->getCallSite(), formalIn->getFun()));
             } else if(type == "FormalOUTSVFGNode")
             {
-                const FormalOUTSVFGNode* formalOut = SVFUtil::cast<FormalOUTSVFGNode>(getSVFGNode(x.first));
+                const FormalOUTSVFGNode* formalOut = SVFUtil::cast<FormalOUTSVFGNode>(getSVFGNode(id));
                 if (edgeStr.find("intra") != string::npos) 
                 {
                     size_t next = edgeStr.find("intra:") + 6;
                     edge = atoi(edgeStr.substr(next).c_str());
-                    addIntraIndirectVFEdge(edge, x.first, formalOut->getMRVer()->getMR()->getPointsTo());
+                    addIntraIndirectVFEdge(edge, id, formalOut->getMRVer()->getMR()->getPointsTo());
                 } 
                 else
                 {
@@ -551,19 +603,29 @@ void SVFG::readFile(const string& filename){
                 }
             } else if(type == "ActualINSVFGNode")
             {
-                addIntraIndirectVFEdge(edge,x.first, nodeMRVers[x.first].first->getMR()->getPointsTo());
+                addIntraIndirectVFEdge(edge,id, nodes[id].first->getMR()->getPointsTo());
             } else if(type == "ActualOUTSVFGNode")
             {
                 // There's no need to connect actual out node to its definition site in the same function.
             } else if (type == "PHISVFGNode")
             {
-                addIntraIndirectVFEdge(edge,x.first, nodeMRVers[x.first].first->getMR()->getPointsTo());
+                addIntraIndirectVFEdge(edge,id, nodes[id].first->getMR()->getPointsTo());
             } else if (type == "StoreNode")
             {
-                addIntraIndirectVFEdge(edge,x.first, nodeMRVers[x.first].first->getMR()->getPointsTo());
+                last = x.find("|");
+                edge = atoi(x.substr(0, last).c_str());
+                string tempMRVerStr = x.substr(last + 1);
+                MRVer* tempMRVer; 
+                tempMRVer = getMRVERFromString(tempMRVerStr);
+                addIntraIndirectVFEdge(edge,id, tempMRVer->getMR()->getPointsTo());
             } else if (type == "LoadNode") 
             {
-                addIntraIndirectVFEdge(edge,x.first, nodeMRVers[x.first].first->getMR()->getPointsTo());
+                last = x.find("|");
+                edge = atoi(x.substr(0, last).c_str());
+                string tempMRVerStr = x.substr(last + 1);
+                MRVer* tempMRVer; 
+                tempMRVer = getMRVERFromString(tempMRVerStr);
+                addIntraIndirectVFEdge(edge,id, tempMRVer->getMR()->getPointsTo());
             } else {
             }
         }
