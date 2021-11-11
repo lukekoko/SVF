@@ -221,12 +221,8 @@ void SVFG::buildSVFG()
 
     stat->startClk();
     if (!Options::ReadSVFG.empty())
-    {
-        stat->ATVFNodeStart();
-        stat->indVFEdgeStart();
+    {       
         readFile(Options::ReadSVFG);
-        stat->ATVFNodeEnd();
-        stat->indVFEdgeEnd();
     } 
     else 
     {
@@ -409,7 +405,7 @@ void SVFG::writeToFile(const string& filename)
             {
                 const MRVer* op = it->second;
                 NodeID def = getDef(op);
-                F.os() << def << ",";
+                F.os() << def << "|MVER: {"<< *op << "},";
             }
             F.os() << ")\n";
         }
@@ -433,11 +429,10 @@ void SVFG::readFile(const string& filename){
         outs() << " error opening file for reading!\n";
         return;
     }
-    unordered_map<NodeID, pair<MRVer*, string>> nodes; 
-    unordered_map<NodeID, string> edges; 
     //outer loop through each line in the file
     string line;
     // add nodes
+    stat->ATVFNodeStart();
     while (F.good())
     {
         getline(F, line);
@@ -476,7 +471,6 @@ void SVFG::readFile(const string& filename){
         if(!MR.empty())
         {
             tempMRVer = getMRVERFromString(MR);
-            nodes.insert(make_pair(id, make_pair(tempMRVer, type)));
         } 
         //add nodes using the variables we extracted
         if(type == "FormalINSVFGNode")
@@ -519,15 +513,14 @@ void SVFG::readFile(const string& filename){
         {
         }
     }
-
+    stat->ATVFNodeEnd();
+    stat->indVFEdgeStart();
     // Edges 
     while (F.good())
     {   
         getline(F, line);
         if (line.empty())
             continue;
-        if (line.find("__Edges__") != std::string::npos)
-            break;
 
         std::string s = line; 
         std::string delimiter = ">=";
@@ -555,9 +548,9 @@ void SVFG::readFile(const string& filename){
         temp = edgeStr.substr(next, last-next);
         if (temp.length() == 0)
             continue;
-
+        // split edges by delimiter; , or }, depending on type
         vector<string> edges;
-        if (type != "StoreNode" && type != "LoadNode") 
+        if (type != "StoreNode" && type != "LoadNode" && type != "PHISVFGNode") 
         {
             string ss;
             stringstream sss(temp);
@@ -577,6 +570,7 @@ void SVFG::readFile(const string& filename){
             if (temp.length() > 0)
                 edges.push_back(temp);
         }
+        // connnect edges
         for (string x: edges) 
         {
             NodeID edge;
@@ -590,10 +584,10 @@ void SVFG::readFile(const string& filename){
             } else if(type == "FormalOUTSVFGNode")
             {
                 const FormalOUTSVFGNode* formalOut = SVFUtil::cast<FormalOUTSVFGNode>(getSVFGNode(id));
-                if (edgeStr.find("intra") != string::npos) 
+                if (x.find("intra") != string::npos) 
                 {
-                    size_t next = edgeStr.find("intra:") + 6;
-                    edge = atoi(edgeStr.substr(next).c_str());
+                    size_t next = x.find("intra:") + 6;
+                    edge = atoi(x.substr(next).c_str());
                     addIntraIndirectVFEdge(edge, id, formalOut->getMRVer()->getMR()->getPointsTo());
                 } 
                 else
@@ -603,22 +597,12 @@ void SVFG::readFile(const string& filename){
                 }
             } else if(type == "ActualINSVFGNode")
             {
-                addIntraIndirectVFEdge(edge,id, nodes[id].first->getMR()->getPointsTo());
+                const ActualINSVFGNode* actualIn = SVFUtil::cast<ActualINSVFGNode>(getSVFGNode(id));
+                addIntraIndirectVFEdge(edge,id, actualIn->getMRVer()->getMR()->getPointsTo());
             } else if(type == "ActualOUTSVFGNode")
             {
                 // There's no need to connect actual out node to its definition site in the same function.
-            } else if (type == "PHISVFGNode")
-            {
-                addIntraIndirectVFEdge(edge,id, nodes[id].first->getMR()->getPointsTo());
-            } else if (type == "StoreNode")
-            {
-                last = x.find("|");
-                edge = atoi(x.substr(0, last).c_str());
-                string tempMRVerStr = x.substr(last + 1);
-                MRVer* tempMRVer; 
-                tempMRVer = getMRVERFromString(tempMRVerStr);
-                addIntraIndirectVFEdge(edge,id, tempMRVer->getMR()->getPointsTo());
-            } else if (type == "LoadNode") 
+            } else if (type == "StoreNode" || type == "LoadNode" || type == "PHISVFGNode")
             {
                 last = x.find("|");
                 edge = atoi(x.substr(0, last).c_str());
@@ -630,6 +614,7 @@ void SVFG::readFile(const string& filename){
             }
         }
     }
+    stat->indVFEdgeEnd();
     connectFromGlobalToProgEntry();
 }
 
@@ -753,7 +738,6 @@ void SVFG::addSVFGNodesForAddrTakenVars()
  */
 void SVFG::connectIndirectSVFGEdges()
 {
-
     for(iterator it = begin(), eit = end(); it!=eit; ++it)
     {
         NodeID nodeId = it->first;
