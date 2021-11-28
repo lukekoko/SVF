@@ -46,7 +46,8 @@ jobs:
               npm version patch
             fi 
           fi
-          git clone "https://github.com/lukekoko/Test-Suite";
+          https://github.com/Wren71/Test-Suite.git;
+          git checkout add_fspta;
           ${{github.workspace}}/build.sh
 
       # run ctest
