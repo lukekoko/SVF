@@ -47,7 +47,6 @@ jobs:
             fi 
           fi
           https://github.com/Wren71/Test-Suite.git;
-          git checkout add_fspta;
           ${{github.workspace}}/build.sh
 
       # run ctest
